@@ -1,0 +1,7 @@
+{
+	"uuid": "crop-bottom@local",
+	"name": "Crop Bottom",
+	"description": "Black out and reserve the bottom portion of the primary monitor.",
+	"shell-version": ["45","46","47","48","49"],
+	"version": 1
+}
