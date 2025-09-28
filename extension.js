@@ -3,6 +3,7 @@ import Clutter from 'gi://Clutter';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
 
 const RATIO = 0.52; // %
 
@@ -10,7 +11,7 @@ const KEYBOARD_MAC = 'D0:A3:08:0D:01:F8';
 const KEYBOARD_PATH = `/org/bluez/hci0/dev_${KEYBOARD_MAC.replace(/:/g, '_')}`; 
 const BUS  = Gio.DBus.system;
 
-export default class CropBottom {
+export default class CropFoldedScreen {
 	enable() {
 		this._shown = false;
 
@@ -33,32 +34,41 @@ export default class CropBottom {
 			this._overlay.set_size(m.width, h);
 		};
 
-		// try {
-		// 	const params = Gio.DBusProxy.new_for_bus_sync(
-		// 		Gio.BusType.SYSTEM, Gio.DBusProxyFlags.DO_NOT_LOAD_PROPERTIES, null,
-		// 		'org.bluez', KEYBOARD_PATH, 'org.bluez.Device1', null
-		// 	);
-		// 	const [iface, dict ] = params.deepUnpack();  // ← key!
-		// 	if ('Connected' in dict) 
-		// 		dict.Connected.get_boolean() ? this._onConnect() : this._onDisconnect();
-		//
-		// } catch (_) { /* device path may not exist yet; ignore */ }
-
-		this._subId = Gio.DBus.system.signal_subscribe(
-			'org.bluez',                               // sender
-			'org.freedesktop.DBus.Properties',         // interface
-			'PropertiesChanged',                       // member
-			KEYBOARD_PATH,                             // object path: /org/bluez/hci0/dev_XX_XX_...
-			'org.bluez.Device1',                       // arg0: interface being changed
-			Gio.DBusSignalFlags.MATCH_ARG0,            // require arg0 exact match
+		this._subId = BUS.signal_subscribe(
+			'org.bluez',                               
+			'org.freedesktop.DBus.Properties',         
+			'PropertiesChanged',                       
+			KEYBOARD_PATH,                             
+			'org.bluez.Device1',                       
+			Gio.DBusSignalFlags.MATCH_ARG0,            
 			(_c, _s, objectPath, _iface, _sig, params) => {
-				log("[crop-bottom] signal: " + objectPath);
-				if (objectPath !== KEYBOARD_PATH) return;
 				const [iface, dict ] = params.deepUnpack();  // ← key!
 				if ('Connected' in dict) 
 					dict.Connected.get_boolean() ? this._onConnect() : this._onDisconnect();
 			}
 		);
+		BUS.call(
+			'org.bluez',
+			KEYBOARD_PATH,
+			'org.freedesktop.DBus.Properties',
+			'Get',
+			new GLib.Variant('(ss)', ['org.bluez.Device1', 'Connected']),
+			null,
+			Gio.DBusCallFlags.NONE,
+			-1,
+			null,
+			(conn, res) => {
+				try {
+					const out = conn.call_finish(res).deepUnpack(); // returns [Variant]
+					const isConnected = out[0].deepUnpack();        // unpack the boolean inside the Variant
+					if (isConnected)
+						this._onConnect();
+				} catch (e) {
+					// Device path might not exist yet or BlueZ isn't up; safe to ignore.
+					log(`[CropBottom] Initial Connected check failed: ${e.message}`);
+				}
+			}
+		);		
 
 	}
 
