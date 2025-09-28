@@ -30,6 +30,7 @@ export default class CropFoldedScreen {
 			this._overlay.set_position(m.x, m.y + m.height - h);
 			this._overlay.set_size(m.width, h);
 			this._repositionOverview();
+			this._repositionDialogOffset();
 		};
 
 		this._subId = BUS.signal_subscribe(
@@ -132,6 +133,7 @@ export default class CropFoldedScreen {
 			);
 
 			this._cropOverview();
+			this._cropSystemDialog();
 		} finally {
 			this._adding = false;
 		}	
@@ -176,6 +178,22 @@ export default class CropFoldedScreen {
 		this._getOverviewGroup = getGroup;
 	}
 
+	_cropSystemDialog() {
+		if (this._modalOffsetActive) return;
+		this._modalOffsetActive = true;
+
+		// group that hosts system modal dialogs (EndSession, Polkit, etc.)
+		this._modalGroup = Main.layoutManager.modalDialogGroup ?? null;
+
+		this._repositionDialogOffset();
+	}
+
+	_repositionDialogOffset() {
+		if (!this._modalOffsetActive) return;
+		this._yOffset = Math.floor(this._getCropHeight() / 2);
+		if (this._modalGroup)
+			this._modalGroup.translation_y = -this._yOffset;
+	}
 
 	_repositionOverview() {
 		if (!this._overviewOffsetActive) return;
@@ -212,6 +230,7 @@ export default class CropFoldedScreen {
 			try { Main.layoutManager._queueUpdateRegions?.(); } catch {}
 
 			this._restore_overview();
+			this._restoreSystemDialog();
 		} finally {
 			this._removing = false;
 		}		
@@ -229,6 +248,16 @@ export default class CropFoldedScreen {
 		if (g) g.translation_y = 0;
 
 		this._getOverviewGroup = null;
+	}
+
+	_restoreSystemDialog() {
+		if (!this._modalOffsetActive) return;
+		this._modalOffsetActive = false;
+
+		if (this._modalGroup)
+			this._modalGroup.translation_y = 0;
+
+		this._modalGroup = null;
 	}
 
 	_show_indicator() {
