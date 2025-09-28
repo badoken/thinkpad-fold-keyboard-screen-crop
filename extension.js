@@ -89,20 +89,72 @@ export default class CropFoldedScreen {
 	}
 
 	_crop_screen() {
-		if (this._shown) return;
+		if (this._shown || this._adding) return;
+		this._adding = true;
+		try {
+			this._shown = true;
 
-		Main.layoutManager.addChrome(this._overlay, {
-			affectsStruts: true,      
-			affectsInputRegion: false, 
-			trackFullscreen: false
+			Main.layoutManager.addChrome(this._overlay, {
+				affectsStruts: true,
+				affectsInputRegion: false, // if you just want to reserve space
+				trackFullscreen: false,    // or true, per your choice
+			});
 
-		});
-		this._monSig = Main.layoutManager.connect('monitors-changed', () => this._reposition());
-		this._workSig = Main.layoutManager.connect('workareas-changed', () => this._reposition());
-		// this._scaleSig = Main.layoutManager.connect('global-scale-factor-changed', () => this._reposition());
-		this._reposition();
+			// Portable source of scale-factor changes
+			this._themeCtx = St.ThemeContext.get_for_stage(global.stage);
 
-		this._shown = true;
+			// Reposition on monitor topology changes
+			Main.layoutManager.connectObject(
+				'monitors-changed', () => this._reposition(),
+				this
+			);
+
+			// Reposition when workareas change (panels/docks/struts)
+			global.display.connectObject(
+				'workareas-changed', () => this._reposition(),
+				this
+			);
+
+			// Reposition on scale-factor changes (HiDPI / fractional scaling tweaks)
+			this._themeCtx.connectObject(
+				'notify::scale-factor', () => this._reposition(),
+				this
+			);
+
+		} finally {
+			this._adding = false;
+		}	
+	}
+
+	_restore_screen() {
+		if (!this._shown || this._removing) return;
+		this._removing = true;
+		try {
+			// Block any re-entrant add/reposition during removal
+			this._shown = false;
+
+			// Disconnect all the hooks we added while shown
+			try { Main.layoutManager.disconnectObject(this); } catch {}
+			try { global.display.disconnectObject(this); } catch {}
+			try { this._themeCtx?.disconnectObject(this); } catch {}
+
+			// Drop the strut immediately, then untrack the actor
+			this._overlay.set_size(0, 0);
+			this._overlay.set_position(0, 0);
+			try { Main.layoutManager.removeChrome(this._overlay); } catch {}
+
+			// Some Shell versions don’t recompute workareas synchronously here.
+			// Nudge the region update; guard for private API.
+			try { Main.layoutManager._queueUpdateRegions?.(); } catch {}
+
+			// If you still see a stuck workarea on your build, uncomment:
+			// GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+			//     try { Main.layoutManager._queueUpdateRegions?.(); } catch {}
+			//     return GLib.SOURCE_REMOVE;
+			// });
+		} finally {
+			this._removing = false;
+		}		
 	}
 
 	_show_indicator() {
@@ -119,15 +171,7 @@ export default class CropFoldedScreen {
 
 	_toggle() { this._shown ? this._restore_screen() : this._crop_screen(); }
 
-	_restore_screen() {
-		if (!this._shown) return;
-		if (this._monSig) { Main.layoutManager.disconnect(this._monSig); this._monSig = 0; }
-		if (this._workSig) { Main.layoutManager.disconnect(this._workSig); this._workSig = 0; } 
-		if (this._scaleSig) { Main.layoutManager.disconnect(this._scaleSig); this._scaleSig = 0; } 
-		Main.layoutManager.removeChrome(this._overlay);
-		this._shown = false;
-	}
-
+	
 	_hide_indicator() {
 		if (this._indicator) 
 			this._indicator.destroy(); this._indicator = null; 
