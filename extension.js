@@ -13,19 +13,17 @@ const BUS  = Gio.DBus.system;
 
 export default class CropFoldedScreen {
 	enable() {
+		this._enabled = true;
+		this._getConnCancellable = new Gio.Cancellable();
+
 		this._shown = false;
 
 		this._overlay = new St.Widget({
-			style: 'background-color: black;',
 			reactive: false,
 			can_focus: false,
 			x_expand: true,
 			y_expand: false,
 		});
-		const stop = () => Clutter.EVENT_STOP;
-		['button-press-event','button-release-event','scroll-event','motion-event','touch-event','key-press-event','key-release-event']
-			.forEach(sig => this._overlay.connect(sig, stop));
-
 		this._reposition = () => {
 			const m = Main.layoutManager.primaryMonitor;
 			const h = Math.round(m.height * RATIO);
@@ -42,6 +40,8 @@ export default class CropFoldedScreen {
 			'org.bluez.Device1',                       
 			Gio.DBusSignalFlags.MATCH_ARG0,            
 			(_c, _s, objectPath, _iface, _sig, params) => {
+				if (!this._enabled) 
+					return;
 				const [iface, dict ] = params.deepUnpack();
 				if ('Connected' in dict) 
 					dict.Connected.get_boolean() ? this._onConnect() : this._onDisconnect();
@@ -56,8 +56,10 @@ export default class CropFoldedScreen {
 			null,
 			Gio.DBusCallFlags.NONE,
 			-1,
-			null,
+			this._getConnCancellable,
 			(conn, res) => {
+				if (!this._enabled) 
+					return;
 				try {
 					const out = conn.call_finish(res).deepUnpack(); 
 					const isConnected = out[0].deepUnpack();        
@@ -82,11 +84,18 @@ export default class CropFoldedScreen {
 	}
 
 	disable() {
+		this._enabled = false;
+
+		try { this._getConnCancellable?.cancel(); } catch {}
+		this._getConnCancellable = null;
+
+		if (this._subId) {
+			BUS.signal_unsubscribe(this._subId);
+			this._subId = 0; // ensure no dangling id
+		}
 		this._restore_screen();
 		this._hide_indicator();
 		if (this._overlay)   { this._overlay.destroy();   this._overlay   = null; }
-		if (this._subId)
-			BUS.signal_unsubscribe(this._subId);
 	}
 
 	_crop_screen() {
@@ -180,8 +189,9 @@ export default class CropFoldedScreen {
 	}
 
 	_restore_screen() {
-		if (!this._shown || this._removing) return;
-		this._removing = true;
+		if (this._removing) return;
+		if (!this._shown) { this._restore_overview(); return; }
+
 		try {
 			// Block any re-entrant add/reposition during removal
 			this._shown = false;
@@ -190,6 +200,7 @@ export default class CropFoldedScreen {
 			try { Main.layoutManager.disconnectObject(this); } catch {}
 			try { global.display.disconnectObject(this); } catch {}
 			try { this._themeCtx?.disconnectObject(this); } catch {}
+			this._themeCtx = null;
 
 			// Drop the strut immediately, then untrack the actor
 			this._overlay.set_size(0, 0);
@@ -228,16 +239,24 @@ export default class CropFoldedScreen {
 		this._indicator.add_child(this._icon);
 		this._click = new Clutter.ClickAction();
 		this._indicator.add_action(this._click);
-		this._click.connect('clicked', () => this._toggle());
+		this._clickHandlerId = this._click.connect('clicked', () => this._toggle());
 		Main.panel.addToStatusArea('crop-bottom', this._indicator, 1, 'right');
 	}
 
-	_toggle() { this._shown ? this._restore_screen() : this._crop_screen(); }
+	_toggle() { 
+		this._shown ? this._restore_screen() : this._crop_screen();
+		this._reposition();
+	}
 
-	
+
 	_hide_indicator() {
-		if (this._indicator) 
-			this._indicator.destroy(); this._indicator = null; 
+		if (!this._indicator) return;
+		try { if (this._click && this._clickHandlerId) this._click.disconnect(this._clickHandlerId); } catch {}
+		this._clickHandlerId = 0;
+		this._click = null;
+		this._indicator.destroy();
+		this._indicator = null;
+		this._icon = null;
 	}
 }
 
