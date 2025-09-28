@@ -15,11 +15,10 @@ export default class CropFoldedScreen {
 	enable() {
 		this._shown = false;
 
-		// The black, input-eating overlay
 		this._overlay = new St.Widget({
 			style: 'background-color: black;',
-			reactive: true,
-			can_focus: true,
+			reactive: false,
+			can_focus: false,
 			x_expand: true,
 			y_expand: false,
 		});
@@ -42,7 +41,7 @@ export default class CropFoldedScreen {
 			'org.bluez.Device1',                       
 			Gio.DBusSignalFlags.MATCH_ARG0,            
 			(_c, _s, objectPath, _iface, _sig, params) => {
-				const [iface, dict ] = params.deepUnpack();  // ← key!
+				const [iface, dict ] = params.deepUnpack();
 				if ('Connected' in dict) 
 					dict.Connected.get_boolean() ? this._onConnect() : this._onDisconnect();
 			}
@@ -59,8 +58,8 @@ export default class CropFoldedScreen {
 			null,
 			(conn, res) => {
 				try {
-					const out = conn.call_finish(res).deepUnpack(); // returns [Variant]
-					const isConnected = out[0].deepUnpack();        // unpack the boolean inside the Variant
+					const out = conn.call_finish(res).deepUnpack(); 
+					const isConnected = out[0].deepUnpack();        
 					if (isConnected)
 						this._onConnect();
 				} catch (e) {
@@ -93,11 +92,14 @@ export default class CropFoldedScreen {
 		if (this._shown) return;
 
 		Main.layoutManager.addChrome(this._overlay, {
-			affectsStruts: true,      // shrink usable area (keep windows above)
-			affectsInputRegion: true, // block input below
-			trackFullscreen: true
+			affectsStruts: true,      
+			affectsInputRegion: false, 
+			trackFullscreen: false
+
 		});
 		this._monSig = Main.layoutManager.connect('monitors-changed', () => this._reposition());
+		this._workSig = Main.layoutManager.connect('workareas-changed', () => this._reposition());
+		// this._scaleSig = Main.layoutManager.connect('global-scale-factor-changed', () => this._reposition());
 		this._reposition();
 
 		this._shown = true;
@@ -120,6 +122,8 @@ export default class CropFoldedScreen {
 	_restore_screen() {
 		if (!this._shown) return;
 		if (this._monSig) { Main.layoutManager.disconnect(this._monSig); this._monSig = 0; }
+		if (this._workSig) { Main.layoutManager.disconnect(this._workSig); this._workSig = 0; } 
+		if (this._scaleSig) { Main.layoutManager.disconnect(this._scaleSig); this._scaleSig = 0; } 
 		Main.layoutManager.removeChrome(this._overlay);
 		this._shown = false;
 	}
