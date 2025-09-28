@@ -31,6 +31,7 @@ export default class CropFoldedScreen {
 			const h = Math.round(m.height * RATIO);
 			this._overlay.set_position(m.x, m.y + m.height - h);
 			this._overlay.set_size(m.width, h);
+			this._repositionOverview();
 		};
 
 		this._subId = BUS.signal_subscribe(
@@ -121,9 +122,61 @@ export default class CropFoldedScreen {
 				this
 			);
 
+			this._cropOverview();
 		} finally {
 			this._adding = false;
 		}	
+	}
+	_getCropHeight() {
+		const m = Main.layoutManager.primaryMonitor;
+		return Math.round(m.height * RATIO);
+	}
+
+	_cropOverview() {
+		if (this._overviewOffsetActive) return;
+		this._overviewOffsetActive = true;
+
+		// compute initial offset: center of (screen - crop) vs whole screen ⇒ h/2
+		this._yOffset = Math.floor(this._getCropHeight() / 2);
+
+		// robust handle for the overview group across shell versions
+		const getGroup = () =>
+			Main.layoutManager.overviewGroup ?? Main.overview?._overview ?? null;
+
+		const apply = () => {
+			const g = getGroup();
+			if (g) g.translation_y = -this._yOffset;
+		};
+		const reset = () => {
+			const g = getGroup();
+			if (g) g.translation_y = 0;
+		};
+
+		// Move overview when it opens, reset when it closes
+		Main.overview.connectObject(
+			'showing', apply,
+			'hiding',  reset,
+			this
+		);
+
+		// If already visible, apply now
+		if (Main.overview.visibleTarget)
+			apply();
+
+		// stash for updates/remove
+		this._getOverviewGroup = getGroup;
+	}
+
+
+	_repositionOverview() {
+		if (!this._overviewOffsetActive) return;
+		this._yOffset = Math.floor(this._getCropHeight() / 2);
+
+		// If overview is currently showing, keep it in the right place
+		if (Main.overview.visibleTarget) {
+			const g = this._getOverviewGroup?.();
+			if (g) g.translation_y = -this._yOffset;
+		}
 	}
 
 	_restore_screen() {
@@ -147,14 +200,24 @@ export default class CropFoldedScreen {
 			// Nudge the region update; guard for private API.
 			try { Main.layoutManager._queueUpdateRegions?.(); } catch {}
 
-			// If you still see a stuck workarea on your build, uncomment:
-			// GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
-			//     try { Main.layoutManager._queueUpdateRegions?.(); } catch {}
-			//     return GLib.SOURCE_REMOVE;
-			// });
+			this._restore_overview();
 		} finally {
 			this._removing = false;
 		}		
+	}
+
+	_restore_overview() {
+		if (!this._overviewOffsetActive) return;
+		this._overviewOffsetActive = false;
+
+		// disconnect our 'showing'/'hiding' hooks
+		try { Main.overview.disconnectObject(this); } catch {}
+
+		// clear any remaining translation
+		const g = this._getOverviewGroup?.();
+		if (g) g.translation_y = 0;
+
+		this._getOverviewGroup = null;
 	}
 
 	_show_indicator() {
