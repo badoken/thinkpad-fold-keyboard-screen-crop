@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist gettext-domain="gnome-shell-extensions">
+  <schema id="org.gnome.shell.extensions.crop-bottom"
+          path="/org/gnome/shell/extensions/crop-bottom/">
+    <key name="toggle-crop" type="as">
+      <default>['&lt;Super&gt;F12']</default>
+      <summary>Toggle crop</summary>
+      <description>Hotkey for toggling the crop indicator and screen mode.</description>
+    </key>
+  </schema>
+</schemalist>
+

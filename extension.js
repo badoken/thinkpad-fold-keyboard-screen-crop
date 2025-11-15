@@ -4,6 +4,8 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import Meta from 'gi://Meta';
+import Shell from 'gi://Shell';
 
 const RATIO = 0.52; // %
 
@@ -73,6 +75,34 @@ export default class CropFoldedScreen {
 			}
 		);		
 
+		try {
+			const file = Gio.File.new_for_uri(import.meta.url); // path to this JS file
+			const extDir = file.get_parent();                   // <extension-root>
+			const schemaDir = extDir.get_child('schemas').get_path();
+			log(`[CropBottom] schemaDir=${schemaDir}`);
+
+			// 2) Load schema from that directory
+			const SCHEMA_ID = 'org.gnome.shell.extensions.crop-bottom';
+			const src = Gio.SettingsSchemaSource.new_from_directory(
+				schemaDir,
+				Gio.SettingsSchemaSource.get_default(),
+				/*trusted=*/ false
+			);
+			const schema = src.lookup(SCHEMA_ID, /*recursive=*/ true);
+			if (!schema)
+				throw new Error(`Schema ${SCHEMA_ID} not found in ${schemaDir}`);
+
+			this._settings = new Gio.Settings({ settings_schema: schema });
+			Main.wm.addKeybinding(
+				'toggle-crop',                 // key name from your schema
+				this._settings,                // the Gio.Settings you created
+				Meta.KeyBindingFlags.NONE,
+				Shell.ActionMode.ALL,          // active in normal shell modes
+				() => this._toggle()           // your handler
+			);
+		} catch (e) {
+			log(`[CropBottom] addKeybinding failed: ${e.message}`);
+		}
 	}
 
 	_onConnect() {
@@ -105,9 +135,9 @@ export default class CropFoldedScreen {
 		try {
 			this._shown = true;
 
-			Main.layoutManager.addChrome(this._overlay, {
+			Main.layoutManager.addTopChrome(this._overlay, {
 				affectsStruts: true,
-				affectsInputRegion: false, // if you just want to reserve space
+				affectsInputRegion: false,
 				trackFullscreen: false,    // or true, per your choice
 			});
 
@@ -266,9 +296,11 @@ export default class CropFoldedScreen {
 		this._indicator = new PanelMenu.Button(0.0, 'CropBottom');
 		this._icon = new St.Icon({ icon_name: 'input-keyboard-symbolic', style_class: 'system-status-icon' });
 		this._indicator.add_child(this._icon);
-		this._click = new Clutter.ClickAction();
-		this._indicator.add_action(this._click);
-		this._clickHandlerId = this._click.connect('clicked', () => this._toggle());
+		this._click = new Clutter.ClickGesture();
+		this._click.set_required_button(1); // primary button
+		this._indicator.add_action(this._click); // gestures are still Clutter.Action descendants
+		this._clickHandlerId = this._click.connect('recognize', () => this._toggle());
+
 		Main.panel.addToStatusArea('crop-bottom', this._indicator, 1, 'right');
 	}
 
